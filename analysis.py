@@ -162,18 +162,58 @@ fig.tight_layout()
 fig.savefig(OUT / "confusion_matrices.png", dpi=200)
 plt.close(fig)
 
-fig, ax = plt.subplots(figsize=(5.5, 3.2))
-bars = ax.bar(["Hold every slot\n(baseline)", "Overbook when\ntree says no-show (v1)"],
-              results["per_appt"], color=["#999999", "#222222"])
-for bar, val in zip(bars, results["per_appt"]):
-    ax.text(bar.get_x() + bar.get_width() / 2, val, f"${val:.2f}", ha="center", va="top",
-            color="white", fontsize=12, fontweight="bold")
-ax.axhline(0, color="black", lw=0.8)
-ax.set_ylabel("Value per appointment ($)")
-ax.spines[["top", "right"]].set_visible(False)
+# Money lost per appointment, drawn as upward bars (losses shown as positive amounts)
+loss = -results["per_appt"]
+saving = loss.iloc[0] - loss.iloc[1]
+fig, ax = plt.subplots(figsize=(5.5, 3.6))
+bars = ax.bar(["Hold every slot\n(current policy)", "Overbook when the\nmodel predicts a no-show"],
+              loss, color=["#999999", "#222222"], width=0.55)
+for bar, val in zip(bars, loss):
+    ax.text(bar.get_x() + bar.get_width() / 2, val + loss.max() * 0.03, f"${val:.2f}",
+            ha="center", va="bottom", fontsize=13, fontweight="bold")
+ax.set_title(f"Cost of no-shows and double-bookings, per appointment",
+             fontsize=12, pad=12)
+ax.set_ylim(0, loss.max() * 1.18)
+ax.set_yticks([])
+ax.spines[["top", "right", "left"]].set_visible(False)
+ax.tick_params(axis="x", length=0, labelsize=10)
 fig.tight_layout()
 fig.savefig(OUT / "value_per_appt.png", dpi=200)
 plt.close(fig)
 
+# Tree with the paths for appointments D and E highlighted (labelled Patient 1 and Patient 2)
+PATIENTS = [("Patient 1", D, "#1f6fb2"), ("Patient 2", E, "#d9822b")]
+fig, ax = plt.subplots(figsize=(16, 7.5))
+drawn = plot_tree(v1, feature_names=FEATURES, class_names=["show", "no-show"], filled=False,
+                  rounded=True, impurity=False, fontsize=10, ax=ax)
+# plot_tree also draws "True"/"False" edge labels (no box); the boxed ones are the nodes, in node-id
+# order, so annots[i] is node i and its arrow comes from the parent
+annots = [a for a in drawn if a.get_bbox_patch() is not None]
+assert len(annots) == v1.tree_.node_count
+for a in annots:
+    a.get_bbox_patch().set(facecolor="white", edgecolor="#bbbbbb", linewidth=1)
+    if a.arrow_patch is not None:
+        a.arrow_patch.set(color="#bbbbbb", linewidth=1)
+path_nodes = {}
+for name, appt, color in PATIENTS:
+    nodes = v1.decision_path(pd.DataFrame([appt])[FEATURES]).indices
+    for n in nodes:
+        path_nodes.setdefault(n, []).append(color)
+        if annots[n].arrow_patch is not None and n != nodes[0]:
+            annots[n].arrow_patch.set(color=color, linewidth=3)
+    leaf = annots[nodes[-1]]
+    ax.annotate(f"{name}\n{decide(appt).upper()}", xy=leaf.get_position(), xycoords=leaf.xycoords,
+                xytext=(0, -62), textcoords="offset points", ha="center", va="top",
+                fontsize=12, fontweight="bold", color=color)
+for n, colors in path_nodes.items():
+    box = annots[n].get_bbox_patch()
+    box.set(edgecolor=colors[0] if len(colors) == 1 else "#222222", linewidth=3)
+    if len(colors) > 1 and annots[n].arrow_patch is not None:  # step shared by both patients
+        annots[n].arrow_patch.set(color="#222222", linewidth=3)
+    box.set_facecolor("#e8f1fa" if colors == ["#1f6fb2"] else "#fbeee0" if colors == ["#d9822b"]
+                      else "#eeeeee")
+fig.savefig(OUT / "tree_patients.png", dpi=200, bbox_inches="tight")
+plt.close(fig)
+
 (OUT / "results.txt").write_text("\n".join(lines) + "\n")
-print(f"\nSaved: {OUT}/results.txt, results.csv, tree_v1.png, confusion_matrices.png, value_per_appt.png")
+print(f"\nSaved: {OUT}/results.txt, results.csv, tree_v1.png, tree_patients.png, confusion_matrices.png, value_per_appt.png")
